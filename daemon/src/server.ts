@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { WaClient } from './wa.js'
 import { listChats, readChat, searchMessages } from './chats.js'
-import { downloadMedia, defaultTranscriber } from './media.js'
+import { downloadMedia, defaultTranscriber, type DownloadResult } from './media.js'
 
 export interface DaemonDeps {
   wa: WaClient
@@ -27,16 +27,35 @@ function json(res: ServerResponse, code: number, body: unknown): void {
   res.end(JSON.stringify(body))
 }
 
+class BodyTooLargeError extends Error {}
+class InvalidJsonError extends Error {}
+
+const MAX_BODY_BYTES = 1024 * 1024 // 1 MB
+
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
-  for await (const c of req) chunks.push(c as Buffer)
-  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+  let size = 0
+  for await (const c of req) {
+    const buf = c as Buffer
+    size += buf.length
+    if (size > MAX_BODY_BYTES) throw new BodyTooLargeError('body demasiado grande')
+    chunks.push(buf)
+  }
+  const raw = Buffer.concat(chunks).toString('utf8')
+  try {
+    return JSON.parse(raw || '{}')
+  } catch {
+    throw new InvalidJsonError('JSON inválido')
+  }
 }
 
 export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
   const token = deps.token ?? randomBytes(16).toString('hex')
   const host = deps.host ?? '127.0.0.1'
   const port = deps.port ?? 8787
+  // Dedupe de descargas en vuelo por messageKey: peticiones concurrentes al mismo
+  // mensaje comparten la misma promesa y no pisan el archivo ni relanzan whisper.
+  const inFlight = new Map<string, Promise<DownloadResult>>()
 
   const server = httpCreate(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${host}`)
@@ -95,16 +114,41 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
 
       if (path === '/media/download' && req.method === 'POST') {
         if (!deps.wa.socket) return json(res, 503, { ok: false, error: 'offline' })
-        const body = (await readBody(req)) as { chatId: string; messageKey: string }
-        const chat = deps.wa.store.chats.all().find((c) => c.id === body.chatId)
+        let body: unknown
+        try {
+          body = await readBody(req)
+        } catch (err) {
+          if (err instanceof BodyTooLargeError) return json(res, 413, { ok: false, error: 'body_too_large' })
+          if (err instanceof InvalidJsonError) return json(res, 400, { ok: false, error: 'invalid_json' })
+          throw err
+        }
+        const chatId = (body as { chatId?: unknown })?.chatId
+        const messageKey = (body as { messageKey?: unknown })?.messageKey
+        if (
+          typeof chatId !== 'string' || chatId.length === 0 ||
+          typeof messageKey !== 'string' || messageKey.length === 0
+        ) {
+          return json(res, 400, { ok: false, error: 'invalid_body' })
+        }
+        const chat = deps.wa.store.chats.all().find((c) => c.id === chatId)
         const exportDir = deps.exportDir ?? join(homedir(), 'waat')
         const transcriber = defaultTranscriber(
           deps.whisperModel ?? 'small',
           deps.whisperLang ?? 'Spanish'
         )
-        const data = await downloadMedia(
-          deps.wa.store, body.chatId, chat?.name ?? body.chatId, body.messageKey, exportDir, transcriber
-        )
+        const key = `${chatId}/${messageKey}`
+        let p = inFlight.get(key)
+        if (!p) {
+          p = downloadMedia(deps.wa.store, chatId, chat?.name ?? chatId, messageKey, exportDir, transcriber)
+          inFlight.set(key, p)
+          // Limpia la entrada al asentarse (éxito o error). .then(f, r) en vez de
+          // .finally() para que la promesa derivada no rechace sin manejarse.
+          void p.then(
+            () => inFlight.delete(key),
+            () => inFlight.delete(key),
+          )
+        }
+        const data = await p
         return json(res, 200, { ok: true, data })
       }
 

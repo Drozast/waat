@@ -1,8 +1,13 @@
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs'
 import { join, basename } from 'node:path'
+import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { downloadMediaMessage, toNumber } from '@whiskeysockets/baileys'
+import {
+  downloadMediaMessage,
+  toNumber,
+  normalizeMessageContent,
+} from '@whiskeysockets/baileys'
 import { chatSlug, loadAll, type ChatStore } from './chats.js'
 
 const pExecFile = promisify(execFile)
@@ -11,18 +16,24 @@ export type Transcriber = (audioPath: string) => Promise<string>
 
 export function defaultTranscriber(model: string, lang: string): Transcriber {
   return async (audioPath: string) => {
-    await pExecFile('whisper', [
-      audioPath,
-      '--language', lang,
-      '--model', model,
-      '--output_format', 'txt',
-      '--output_dir', join('/tmp', 'waat-whisper'),
-      '--fp16', 'False',
-    ])
-    // whisper escribe <output_dir>/<basename sin ext>.txt
-    const base = basename(audioPath).replace(/\.[^.]+$/, '')
-    const txtPath = join('/tmp', 'waat-whisper', `${base}.txt`)
-    return readFileSync(txtPath, 'utf8').trim()
+    // Dir temporal por llamada para no pisar la salida de otra transcripción concurrente
+    const outDir = mkdtempSync(join(tmpdir(), 'waat-whisper-'))
+    try {
+      await pExecFile('whisper', [
+        audioPath,
+        '--language', lang,
+        '--model', model,
+        '--output_format', 'txt',
+        '--output_dir', outDir,
+        '--fp16', 'False',
+      ])
+      // whisper escribe <output_dir>/<basename sin ext>.txt
+      const base = basename(audioPath).replace(/\.[^.]+$/, '')
+      const txtPath = join(outDir, `${base}.txt`)
+      return readFileSync(txtPath, 'utf8').trim()
+    } finally {
+      rmSync(outDir, { recursive: true, force: true })
+    }
   }
 }
 
@@ -54,6 +65,30 @@ export interface DownloadResult {
   transcriptionError?: string
 }
 
+// Seam de inyección para tests: reemplaza la función de descarga de Baileys.
+// Devuelve la función anterior para poder restaurarla.
+type MediaDownloader = typeof downloadMediaMessage
+let downloader: MediaDownloader = downloadMediaMessage
+export function setMediaDownloader(fn: MediaDownloader): MediaDownloader {
+  const prev = downloader
+  downloader = fn
+  return prev
+}
+
+// Si el nombre ya existe, agrega -1, -2, ... antes de la extensión hasta encontrar uno libre
+function uniquePath(dir: string, file: string): string {
+  const dot = file.lastIndexOf('.')
+  const stem = dot > 0 ? file.slice(0, dot) : file
+  const ext = dot > 0 ? file.slice(dot) : ''
+  let candidate = join(dir, file)
+  let i = 1
+  while (existsSync(candidate)) {
+    candidate = join(dir, `${stem}-${i}${ext}`)
+    i++
+  }
+  return candidate
+}
+
 export async function downloadMedia(
   store: ChatStore,
   chatId: string,
@@ -66,18 +101,19 @@ export async function downloadMedia(
   const msg = msgs.find((m) => m.key.id === messageKey)
   if (!msg) throw new Error(`mensaje no encontrado: ${messageKey}`)
 
-  const m = msg.message
+  // Normaliza para soportar mensajes efímeros / view-once (ephemeralMessage, viewOnceMessage, ...)
+  const m = normalizeMessageContent(msg.message)
   const kind = m?.imageMessage
-    ? { tipo: 'imagen', ext: 'jpg', buf: await downloadMediaMessage(msg, 'buffer', {}) }
+    ? { tipo: 'imagen', ext: 'jpg', buf: await downloader(msg, 'buffer', {}) }
     : m?.videoMessage
-      ? { tipo: 'video', ext: 'mp4', buf: await downloadMediaMessage(msg, 'buffer', {}) }
+      ? { tipo: 'video', ext: 'mp4', buf: await downloader(msg, 'buffer', {}) }
       : m?.audioMessage
-        ? { tipo: 'audio', ext: 'opus', buf: await downloadMediaMessage(msg, 'buffer', {}) }
+        ? { tipo: 'audio', ext: 'opus', buf: await downloader(msg, 'buffer', {}) }
         : m?.documentMessage
           ? {
               tipo: 'documento',
               ext: m.documentMessage.fileName?.split('.').pop() ?? 'bin',
-              buf: await downloadMediaMessage(msg, 'buffer', {}),
+              buf: await downloader(msg, 'buffer', {}),
             }
           : null
   if (!kind) throw new Error('el mensaje no contiene media')
@@ -87,7 +123,7 @@ export async function downloadMedia(
   const tsNum = msg.messageTimestamp ? toNumber(msg.messageTimestamp) : 0
   const ts = tsNum > 0 ? new Date(tsNum * 1000) : new Date()
   const file = mediaFileName(ts, kind.tipo, kind.ext)
-  const path = join(dir, file)
+  const path = uniquePath(dir, file)
   writeFileSync(path, kind.buf)
 
   const result: DownloadResult = { messageKey, type: kind.tipo, path }
