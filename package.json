@@ -1,0 +1,15 @@
+{
+  "name": "waat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WhatsApp Agent Toolkit — vincula tu WhatsApp una vez y deja que tus agentes de código lean y escriban conversaciones",
+  "workspaces": ["daemon", "mcp", "cli"],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": { "node": ">=22" },
+  "license": "MIT"
+}
