@@ -1,13 +1,19 @@
 import { createServer as httpCreate, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { WaClient } from './wa.js'
 import { listChats, readChat, searchMessages } from './chats.js'
+import { downloadMedia, defaultTranscriber } from './media.js'
 
 export interface DaemonDeps {
   wa: WaClient
   port?: number
   host?: string
   token?: string
+  exportDir?: string
+  whisperModel?: string
+  whisperLang?: string
 }
 
 export interface DaemonHandle {
@@ -19,6 +25,12 @@ export interface DaemonHandle {
 function json(res: ServerResponse, code: number, body: unknown): void {
   res.writeHead(code, { 'content-type': 'application/json' })
   res.end(JSON.stringify(body))
+}
+
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = []
+  for await (const c of req) chunks.push(c as Buffer)
+  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
 }
 
 export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
@@ -78,6 +90,21 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
         const q = url.searchParams.get('q') ?? ''
         const chat = url.searchParams.get('chat') ?? undefined
         const data = await searchMessages(deps.wa.store, q, chat)
+        return json(res, 200, { ok: true, data })
+      }
+
+      if (path === '/media/download' && req.method === 'POST') {
+        if (!deps.wa.socket) return json(res, 503, { ok: false, error: 'offline' })
+        const body = (await readBody(req)) as { chatId: string; messageKey: string }
+        const chat = deps.wa.store.chats.all().find((c) => c.id === body.chatId)
+        const exportDir = deps.exportDir ?? join(homedir(), 'waat')
+        const transcriber = defaultTranscriber(
+          deps.whisperModel ?? 'small',
+          deps.whisperLang ?? 'Spanish'
+        )
+        const data = await downloadMedia(
+          deps.wa.store, body.chatId, chat?.name ?? body.chatId, body.messageKey, exportDir, transcriber
+        )
         return json(res, 200, { ok: true, data })
       }
 

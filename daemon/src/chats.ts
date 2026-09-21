@@ -10,7 +10,7 @@ export type ChatStore = ReturnType<typeof makeInMemoryStore>
 type MessageCursor = Parameters<ChatStore['loadMessages']>[2]
 const NO_CURSOR = undefined as unknown as MessageCursor
 
-async function loadAll(store: ChatStore, jid: string): Promise<WAMessage[]> {
+export async function loadAll(store: ChatStore, jid: string): Promise<WAMessage[]> {
   return store.loadMessages(jid, Number.MAX_SAFE_INTEGER, NO_CURSOR)
 }
 

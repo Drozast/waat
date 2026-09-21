@@ -23,7 +23,15 @@ const wa = new WaClient({
     console.log(`[waat] QR guardado en ${png} — escanéalo con WhatsApp > Dispositivos vinculados`),
 })
 
-const handle = await createServer({ wa, port: PORT, host: HOST, token: existingToken })
+const handle = await createServer({
+  wa,
+  port: PORT,
+  host: HOST,
+  token: existingToken,
+  exportDir: process.env.WAAT_EXPORT_DIR ?? join(homedir(), 'waat'),
+  whisperModel: process.env.WAAT_WHISPER_MODEL ?? 'small',
+  whisperLang: process.env.WAAT_WHISPER_LANG ?? 'Spanish',
+})
 if (!existingToken) writeFileSync(tokenPath, handle.token, { mode: 0o600 })
 console.log(`[waat] daemon listo en ${handle.url}`)
 
