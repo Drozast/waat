@@ -1,6 +1,7 @@
 import { createServer as httpCreate, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { WaClient } from './wa.js'
+import { listChats, readChat, searchMessages } from './chats.js'
 
 export interface DaemonDeps {
   wa: WaClient
@@ -51,6 +52,36 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
         }
         await deps.wa.start()
         return json(res, 200, { ok: true, data: { state: 'linking', qr: deps.wa.qrPath() } })
+      }
+
+      if (path === '/chats' && req.method === 'GET') {
+        const sock = deps.wa.socket
+        if (!sock) return json(res, 503, { ok: false, error: 'offline' })
+        const q = url.searchParams.get('q')?.toLowerCase()
+        let chats = listChats(sock)
+        if (q) chats = chats.filter((c) => c.name.toLowerCase().includes(q))
+        return json(res, 200, { ok: true, data: chats })
+      }
+
+      const chatMatch = path.match(/^\/chats\/([^/]+)\/messages$/)
+      if (chatMatch && req.method === 'GET') {
+        const sock = deps.wa.socket
+        if (!sock) return json(res, 503, { ok: false, error: 'offline' })
+        const chatId = decodeURIComponent(chatMatch[1])
+        const data = await readChat(sock, chatId, {
+          limit: Number(url.searchParams.get('limit') ?? 50),
+          before: url.searchParams.get('before') ?? undefined,
+        })
+        return json(res, 200, { ok: true, data })
+      }
+
+      if (path === '/search' && req.method === 'GET') {
+        const sock = deps.wa.socket
+        if (!sock) return json(res, 503, { ok: false, error: 'offline' })
+        const q = url.searchParams.get('q') ?? ''
+        const chat = url.searchParams.get('chat') ?? undefined
+        const data = await searchMessages(sock, q, chat)
+        return json(res, 200, { ok: true, data })
       }
 
       return json(res, 404, { ok: false, error: 'not_found' })
