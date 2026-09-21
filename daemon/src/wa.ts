@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import QRCode from 'qrcode'
 import {
   makeWASocket,
+  makeInMemoryStore,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
@@ -44,6 +45,7 @@ export class WaClient {
   private reconnectTimer: NodeJS.Timeout | null = null
   private starting = false
   private startPromise: Promise<void> | null = null
+  private storeRef = makeInMemoryStore({ logger })
   private opts: WaClientOptions
   private qrFile: string
 
@@ -65,6 +67,10 @@ export class WaClient {
 
   get socket(): WASocket | null {
     return this.sock
+  }
+
+  get store() {
+    return this.storeRef
   }
 
   qrPath(): string {
@@ -103,6 +109,7 @@ export class WaClient {
       logger,
     })
     this.sock = sock
+    this.storeRef.bind(sock.ev)
 
     sock.ev.on('creds.update', saveCreds)
 

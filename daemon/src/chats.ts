@@ -1,21 +1,17 @@
-import { toNumber, type WASocket, type WAMessage, type WAMessageContent } from '@whiskeysockets/baileys'
+import {
+  makeInMemoryStore,
+  toNumber,
+  type WAMessage,
+  type WAMessageContent,
+} from '@whiskeysockets/baileys'
 
-// Baileys 6.17.x no expone `chats` ni `fetchMessages` en el tipo WASocket
-// (viven en el Store API), así que describimos la superficie mínima que usamos.
-export interface ChatInfo {
-  id: string
-  name?: string
-  conversation?: string
-  unreadCount?: number
-}
+export type ChatStore = ReturnType<typeof makeInMemoryStore>
 
-export interface ChatSocket {
-  chats: { all: ChatInfo[] }
-  fetchMessages: (chatId: string) => Promise<WAMessage[]>
-}
+type MessageCursor = Parameters<ChatStore['loadMessages']>[2]
+const NO_CURSOR = undefined as unknown as MessageCursor
 
-function chatApi(sock: WASocket): ChatSocket {
-  return sock as unknown as ChatSocket
+async function loadAll(store: ChatStore, jid: string): Promise<WAMessage[]> {
+  return store.loadMessages(jid, Number.MAX_SAFE_INTEGER, NO_CURSOR)
 }
 
 export interface ChatSummary {
@@ -48,6 +44,18 @@ function textOf(m: WAMessageContent | null | undefined): string {
   return m?.conversation ?? m?.extendedTextMessage?.text ?? ''
 }
 
+function previewOf(m: WAMessage | null | undefined): string {
+  if (!m) return ''
+  const body = textOf(m.message)
+  const mt = mediaType(m.message)
+  const caption =
+    m.message?.imageMessage?.caption ?? m.message?.videoMessage?.caption ?? ''
+  const parts: string[] = []
+  if (body) parts.push(body)
+  if (mt) parts.push(`[${mt}]${caption ? ` ${caption}` : ''}`)
+  return parts.join(' ')
+}
+
 export function formatMessages(msgs: WAMessage[]): string {
   const lines: string[] = []
   for (const m of msgs) {
@@ -67,25 +75,30 @@ export function formatMessages(msgs: WAMessage[]): string {
   return lines.join('\n')
 }
 
-export function listChats(sock: WASocket): ChatSummary[] {
-  return chatApi(sock).chats.all
+export function listChats(store: ChatStore): ChatSummary[] {
+  return store.chats
+    .all()
     .filter((c) => c.id && !c.id.endsWith('@broadcast'))
-    .map((c) => ({
-      id: c.id,
-      name: c.name ?? c.id,
-      isGroup: c.id.endsWith('@g.us'),
-      lastMessage: (c.conversation ?? '').slice(0, 120),
-      unreadCount: c.unreadCount ?? 0,
-    }))
+    .map((c) => {
+      const msgs = store.messages[c.id]?.array
+      const last = msgs && msgs.length > 0 ? msgs[msgs.length - 1] : undefined
+      return {
+        id: c.id,
+        name: c.name ?? c.id,
+        isGroup: c.id.endsWith('@g.us'),
+        lastMessage: previewOf(last).slice(0, 120),
+        unreadCount: c.unreadCount ?? 0,
+      }
+    })
     .sort((a, b) => b.unreadCount - a.unreadCount || a.name.localeCompare(b.name))
 }
 
 export async function readChat(
-  sock: WASocket,
+  store: ChatStore,
   chatId: string,
   opts: { limit?: number; before?: string }
 ): Promise<{ messages: string; nextBefore: string | null; count: number }> {
-  const all = await chatApi(sock).fetchMessages(chatId)
+  const all = await loadAll(store, chatId)
   const limit = Math.min(opts.limit ?? 50, 200)
   let msgs = all
   if (opts.before) {
@@ -98,19 +111,19 @@ export async function readChat(
 }
 
 export async function searchMessages(
-  sock: WASocket,
+  store: ChatStore,
   query: string,
   chatId?: string
 ): Promise<{ chatId: string; chatName: string; matches: string }[]> {
   const q = query.toLowerCase()
-  const api = chatApi(sock)
-  const ids = chatId ? [chatId] : api.chats.all.map((c) => c.id)
+  const allChats = store.chats.all()
+  const ids = chatId ? [chatId] : allChats.map((c) => c.id)
   const results: { chatId: string; chatName: string; matches: string }[] = []
   for (const id of ids) {
-    const msgs = await api.fetchMessages(id)
+    const msgs = await loadAll(store, id)
     const hits = msgs.filter((m) => textOf(m.message).toLowerCase().includes(q))
     if (hits.length > 0) {
-      const chat = api.chats.all.find((c) => c.id === id)
+      const chat = allChats.find((c) => c.id === id)
       results.push({
         chatId: id,
         chatName: chat?.name ?? id,

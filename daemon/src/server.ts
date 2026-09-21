@@ -55,20 +55,18 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
       }
 
       if (path === '/chats' && req.method === 'GET') {
-        const sock = deps.wa.socket
-        if (!sock) return json(res, 503, { ok: false, error: 'offline' })
+        if (!deps.wa.socket) return json(res, 503, { ok: false, error: 'offline' })
         const q = url.searchParams.get('q')?.toLowerCase()
-        let chats = listChats(sock)
+        let chats = listChats(deps.wa.store)
         if (q) chats = chats.filter((c) => c.name.toLowerCase().includes(q))
         return json(res, 200, { ok: true, data: chats })
       }
 
       const chatMatch = path.match(/^\/chats\/([^/]+)\/messages$/)
       if (chatMatch && req.method === 'GET') {
-        const sock = deps.wa.socket
-        if (!sock) return json(res, 503, { ok: false, error: 'offline' })
+        if (!deps.wa.socket) return json(res, 503, { ok: false, error: 'offline' })
         const chatId = decodeURIComponent(chatMatch[1])
-        const data = await readChat(sock, chatId, {
+        const data = await readChat(deps.wa.store, chatId, {
           limit: Number(url.searchParams.get('limit') ?? 50),
           before: url.searchParams.get('before') ?? undefined,
         })
@@ -76,11 +74,10 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
       }
 
       if (path === '/search' && req.method === 'GET') {
-        const sock = deps.wa.socket
-        if (!sock) return json(res, 503, { ok: false, error: 'offline' })
+        if (!deps.wa.socket) return json(res, 503, { ok: false, error: 'offline' })
         const q = url.searchParams.get('q') ?? ''
         const chat = url.searchParams.get('chat') ?? undefined
-        const data = await searchMessages(sock, q, chat)
+        const data = await searchMessages(deps.wa.store, q, chat)
         return json(res, 200, { ok: true, data })
       }
 
