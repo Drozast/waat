@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { WaClient } from './wa.js'
 import { listChats, readChat, searchMessages } from './chats.js'
 import { downloadMedia, defaultTranscriber, type DownloadResult } from './media.js'
+import { sendText, sendMedia } from './send.js'
 
 export interface DaemonDeps {
   wa: WaClient
@@ -150,6 +151,36 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
         }
         const data = await p
         return json(res, 200, { ok: true, data })
+      }
+
+      if (path === '/send/text' && req.method === 'POST') {
+        const sock = deps.wa.socket
+        if (!sock) return json(res, 503, { ok: false, error: 'offline' })
+        const body = (await readBody(req)) as { chatId: string; text: string }
+        if (!body.chatId || !body.text) {
+          return json(res, 400, { ok: false, error: 'chatId y text son requeridos' })
+        }
+        const key = await sendText(sock, body.chatId, body.text)
+        return json(res, 200, { ok: true, data: { key: key.id } })
+      }
+
+      if (path === '/send/media' && req.method === 'POST') {
+        const sock = deps.wa.socket
+        if (!sock) return json(res, 503, { ok: false, error: 'offline' })
+        const body = (await readBody(req)) as {
+          chatId: string
+          filePath: string
+          caption?: string
+          ptt?: boolean
+        }
+        if (!body.chatId || !body.filePath) {
+          return json(res, 400, { ok: false, error: 'chatId y filePath son requeridos' })
+        }
+        const data = await sendMedia(sock, body.chatId, body.filePath, {
+          caption: body.caption,
+          ptt: body.ptt,
+        })
+        return json(res, 200, { ok: true, data: { key: data.key.id, type: data.type } })
       }
 
       return json(res, 404, { ok: false, error: 'not_found' })
