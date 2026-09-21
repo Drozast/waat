@@ -1,5 +1,5 @@
 import { createServer as httpCreate, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { WaClient } from './wa.js'
 
 export interface DaemonDeps {
@@ -28,7 +28,11 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
   const server = httpCreate(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${host}`)
     const path = url.pathname
-    const authed = req.headers['x-waat-token'] === token
+    const provided = req.headers['x-waat-token']
+    const authed =
+      typeof provided === 'string' &&
+      provided.length === token.length &&
+      timingSafeEqual(Buffer.from(provided), Buffer.from(token))
 
     try {
       if (path === '/health' && req.method === 'GET') {
@@ -55,8 +59,10 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
     }
   })
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject)
     server.listen(port, host, () => {
+      server.removeListener('error', reject)
       const addr = server.address()
       const actualPort = typeof addr === 'object' && addr ? addr.port : port
       resolve({ server, url: `http://${host}:${actualPort}`, token })

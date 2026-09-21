@@ -49,3 +49,12 @@ test('POST /link offline responde 200 y estado linking', async () => {
   assert.equal(body.data.state, 'linking')
   assert.ok(body.data.qr.endsWith('qr.png'))
 })
+
+test('createServer rechaza con EADDRINUSE si el puerto está ocupado', async () => {
+  const addr = handle.server.address()
+  assert.ok(addr && typeof addr === 'object')
+  await assert.rejects(
+    createServer({ wa, port: addr.port }),
+    (err: NodeJS.ErrnoException) => err.code === 'EADDRINUSE',
+  )
+})

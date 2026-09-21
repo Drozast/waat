@@ -5,7 +5,12 @@ import { WaClient } from './wa.js'
 import { createServer } from './server.js'
 
 const WAAT_DIR = process.env.WAAT_DIR ?? join(homedir(), '.waat')
-const PORT = Number(process.env.WAAT_PORT ?? 8787)
+const portRaw = process.env.WAAT_PORT
+const PORT = portRaw ? Number(portRaw) : 8787
+if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) {
+  console.error(`[waat] WAAT_PORT inválido: ${portRaw}`)
+  process.exit(1)
+}
 const HOST = process.env.WAAT_HOST ?? '127.0.0.1'
 
 mkdirSync(WAAT_DIR, { recursive: true })
@@ -19,7 +24,7 @@ const wa = new WaClient({
 })
 
 const handle = await createServer({ wa, port: PORT, host: HOST, token: existingToken })
-if (!existingToken) writeFileSync(tokenPath, handle.token)
+if (!existingToken) writeFileSync(tokenPath, handle.token, { mode: 0o600 })
 console.log(`[waat] daemon listo en ${handle.url}`)
 
 await wa.start() // si hay sesión guardada entra directo; si no, queda en linking con QR
