@@ -9,7 +9,6 @@ import {
   DisconnectReason,
   type WASocket,
 } from '@whiskeysockets/baileys'
-import type { Boom } from '@hapi/boom'
 
 const logger = {
   level: 'info',
@@ -42,6 +41,7 @@ export class WaClient {
   private jid: string | null = null
   private chatJids = new Set<string>()
   private qrTimer: NodeJS.Timeout | null = null
+  private reconnectTimer: NodeJS.Timeout | null = null
   private opts: WaClientOptions
   private qrFile: string
 
@@ -70,6 +70,8 @@ export class WaClient {
   }
 
   async start(): Promise<void> {
+    if (this.state !== 'offline' && this.state !== 'needs_relink') return
+
     const { state: authState, saveCreds } = await useMultiFileAuthState(
       this.opts.authDir,
     )
@@ -113,10 +115,14 @@ export class WaClient {
         if (this.qrTimer) clearTimeout(this.qrTimer)
       }
       if (connection === 'close') {
-        const code = (lastDisconnect?.error as Boom)?.output?.statusCode
+        const code = (
+          lastDisconnect?.error as
+            | (Error & { output?: { statusCode?: number } })
+            | undefined
+        )?.output?.statusCode
         if (code !== DisconnectReason.loggedOut) {
-          this.state = 'linking'
-          setTimeout(() => this.start().catch(console.error), 2000)
+          this.state = 'offline'
+          this.scheduleReconnect()
         } else {
           this.state = 'needs_relink'
           this.jid = null
@@ -126,16 +132,35 @@ export class WaClient {
   }
 
   async stop(): Promise<void> {
+    this.clearTimers()
     this.sock?.end(undefined)
     this.sock = null
     this.state = 'offline'
+    this.jid = null
+    this.chatJids.clear()
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.start().catch(console.error)
+    }, 2000)
   }
 
   private resetQrTimer(): void {
     if (this.qrTimer) clearTimeout(this.qrTimer)
     this.qrTimer = setTimeout(() => {
+      this.qrTimer = null
       this.sock?.end(undefined)
       this.start().catch(console.error)
     }, 60_000)
+  }
+
+  private clearTimers(): void {
+    if (this.qrTimer) clearTimeout(this.qrTimer)
+    this.qrTimer = null
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
   }
 }
