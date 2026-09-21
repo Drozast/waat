@@ -42,6 +42,7 @@ export class WaClient {
   private chatJids = new Set<string>()
   private qrTimer: NodeJS.Timeout | null = null
   private reconnectTimer: NodeJS.Timeout | null = null
+  private starting = false
   private opts: WaClientOptions
   private qrFile: string
 
@@ -70,70 +71,86 @@ export class WaClient {
   }
 
   async start(): Promise<void> {
-    if (this.state !== 'offline' && this.state !== 'needs_relink') return
-
-    const { state: authState, saveCreds } = await useMultiFileAuthState(
-      this.opts.authDir,
+    if (
+      this.starting ||
+      (this.state !== 'offline' && this.state !== 'needs_relink')
     )
-    const { version } = await fetchLatestBaileysVersion()
-    this.state = authState.creds.registered ? 'online' : 'linking'
+      return
+    this.starting = true
+    try {
+      const { state: authState, saveCreds } = await useMultiFileAuthState(
+        this.opts.authDir,
+      )
+      const { version } = await fetchLatestBaileysVersion()
+      this.state = authState.creds.registered ? 'online' : 'linking'
 
-    const sock = makeWASocket({
-      version,
-      auth: {
-        creds: authState.creds,
-        keys: makeCacheableSignalKeyStore(authState.keys, logger),
-      },
-      printQRInTerminal: false,
-      logger,
-    })
-    this.sock = sock
+      const sock = makeWASocket({
+        version,
+        auth: {
+          creds: authState.creds,
+          keys: makeCacheableSignalKeyStore(authState.keys, logger),
+        },
+        printQRInTerminal: false,
+        logger,
+      })
+      this.sock = sock
 
-    sock.ev.on('creds.update', saveCreds)
+      sock.ev.on('creds.update', saveCreds)
 
-    sock.ev.on('messaging-history.set', ({ chats }) => {
-      this.chatJids = new Set(chats.map((c) => c.id))
-    })
-    sock.ev.on('chats.upsert', (chats) => {
-      for (const c of chats) this.chatJids.add(c.id)
-    })
-    sock.ev.on('chats.delete', (jids) => {
-      for (const jid of jids) this.chatJids.delete(jid)
-    })
+      sock.ev.on('messaging-history.set', ({ chats }) => {
+        this.chatJids = new Set(chats.map((c) => c.id))
+      })
+      sock.ev.on('chats.upsert', (chats) => {
+        for (const c of chats) this.chatJids.add(c.id)
+      })
+      sock.ev.on('chats.delete', (jids) => {
+        for (const jid of jids) this.chatJids.delete(jid)
+      })
 
-    sock.ev.on('connection.update', (update) => {
-      const { connection, lastDisconnect, qr } = update
-      if (qr) {
-        this.state = 'linking'
-        QRCode.toFile(this.qrFile, qr).catch(console.error)
-        this.opts.onQr(qr, this.qrFile)
-        this.resetQrTimer()
-      }
-      if (connection === 'open') {
-        this.state = 'online'
-        this.jid = sock.user?.id ?? null
-        if (this.qrTimer) clearTimeout(this.qrTimer)
-      }
-      if (connection === 'close') {
-        const code = (
-          lastDisconnect?.error as
-            | (Error & { output?: { statusCode?: number } })
-            | undefined
-        )?.output?.statusCode
-        if (code !== DisconnectReason.loggedOut) {
-          this.state = 'offline'
-          this.scheduleReconnect()
-        } else {
-          this.state = 'needs_relink'
-          this.jid = null
+      sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect, qr } = update
+        if (qr) {
+          this.state = 'linking'
+          QRCode.toFile(this.qrFile, qr).catch(console.error)
+          this.opts.onQr(qr, this.qrFile)
+          this.resetQrTimer()
         }
-      }
-    })
+        if (connection === 'open') {
+          this.state = 'online'
+          this.jid = sock.user?.id ?? null
+          if (this.qrTimer) clearTimeout(this.qrTimer)
+        }
+        if (connection === 'close') {
+          const code = (
+            lastDisconnect?.error as
+              | (Error & { output?: { statusCode?: number } })
+              | undefined
+          )?.output?.statusCode
+          if (code !== DisconnectReason.loggedOut) {
+            this.state = 'offline'
+            this.scheduleReconnect()
+          } else {
+            this.state = 'needs_relink'
+            this.jid = null
+          }
+        }
+      })
+    } finally {
+      this.starting = false
+    }
   }
 
   async stop(): Promise<void> {
+    const sock = this.sock
+    if (sock) {
+      sock.end(undefined)
+      // end() removes all 'error' listeners, then ws.close() makes the ws
+      // lib emit "closed before the connection was established" on the next
+      // tick (when still CONNECTING). Re-attach a no-op so that emission is
+      // handled instead of crashing the process with an unhandled 'error'.
+      sock.ws.on('error', () => {})
+    }
     this.clearTimers()
-    this.sock?.end(undefined)
     this.sock = null
     this.state = 'offline'
     this.jid = null
