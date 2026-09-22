@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { registerMcpInOpencode, registerMcpInClaude, copySkills } from '../src/install.js'
+import { registerMcpInOpencode, registerMcpInClaude, copySkills, stripJsonc } from '../src/install.js'
 
 test('registerMcpInOpencode agrega el server al jsonc', () => {
   const dir = mkdtempSync(join(tmpdir(), 'waat-cli-'))
@@ -31,4 +31,37 @@ test('copySkills copia skills a destino', () => {
   writeFileSync(join(src, 'SKILL.md'), '# test skill')
   copySkills(src, dest)
   assert.ok(existsSync(join(dest, 'SKILL.md')))
+})
+
+test('stripJsonc: comentario // inline se quita y el json parsea', () => {
+  const src = '{\n  "url": "https://x.com", // nota\n  "a": 1\n}\n'
+  const parsed = JSON.parse(stripJsonc(src))
+  assert.equal(parsed.url, 'https://x.com')
+  assert.equal(parsed.a, 1)
+})
+
+test('stripJsonc: /* */ dentro de un string NO se corrompe', () => {
+  const src = '{\n  "url": "https://x.com/a/*b*/c"\n}\n'
+  const parsed = JSON.parse(stripJsonc(src))
+  assert.equal(parsed.url, 'https://x.com/a/*b*/c')
+})
+
+test('stripJsonc: trailing comma se quita y el json parsea', () => {
+  const src = '{\n  "a": 1,\n  "b": [1, 2,],\n}\n'
+  const parsed = JSON.parse(stripJsonc(src))
+  assert.equal(parsed.a, 1)
+  assert.deepEqual(parsed.b, [1, 2])
+})
+
+test('stripJsonc: // dentro de un string (URL) NO se corrompe', () => {
+  const src = '{\n  "schema": "https://opencode.ai/config.json"\n}\n'
+  const parsed = JSON.parse(stripJsonc(src))
+  assert.equal(parsed.schema, 'https://opencode.ai/config.json')
+})
+
+test('stripJsonc: coma dentro de un string antes de } NO se toca', () => {
+  const src = '{\n  "a": "x,}",\n  "b": 2\n}\n'
+  const parsed = JSON.parse(stripJsonc(src))
+  assert.equal(parsed.a, 'x,}')
+  assert.equal(parsed.b, 2)
 })

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, openSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, openSync, closeSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -8,13 +8,23 @@ import { registerMcpInOpencode, registerMcpInClaude, copySkills } from './instal
 
 const WAAT_DIR = process.env.WAAT_DIR ?? join(homedir(), '.waat')
 const PORT = process.env.WAAT_PORT ?? '8787'
-const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..')
+const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..')
 const MCP_BIN = join(ROOT, 'mcp', 'dist', 'index.js')
 const SKILLS_DIR = join(ROOT, 'skills')
 
 function die(msg: string): never {
   console.error(`[waat] ${msg}`)
   process.exit(1)
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EPERM') return true // vive, otro usuario
+    return false
+  }
 }
 
 async function daemonUrl(): Promise<string> {
@@ -28,13 +38,21 @@ async function api(path: string, method = 'GET'): Promise<any> {
     method,
     headers: { 'x-waat-token': token, 'content-type': 'application/json' },
   })
-  return res.json()
+  const body = await res.json().catch(() => null)
+  if (!res.ok) {
+    const msg = body && typeof body === 'object' && 'error' in body ? String((body as any).error) : `HTTP ${res.status}`
+    throw new Error(`el daemon respondió con error: ${msg}`)
+  }
+  if (body === null) {
+    throw new Error(`respuesta inválida del daemon (HTTP ${res.status})`)
+  }
+  return body
 }
 
 function cmdStatus(): void {
   api('/status')
     .then((b) => console.log(JSON.stringify(b, null, 2)))
-    .catch(() => die('daemon no responde. Corré: npx waat start'))
+    .catch((e) => die(e instanceof Error ? e.message : 'daemon no responde. Corré: npx waat start'))
 }
 
 function cmdLink(): void {
@@ -45,21 +63,29 @@ function cmdLink(): void {
         console.log('[waat] Escanealo con WhatsApp > Ajustes > Dispositivos vinculados')
       } else die(b.error)
     })
-    .catch(() => die('daemon no responde. Corré: npx waat start'))
+    .catch((e) => die(e instanceof Error ? e.message : 'daemon no responde. Corré: npx waat start'))
 }
 
 function cmdStart(): void {
   const lockPath = join(WAAT_DIR, 'daemon.lock')
-  if (existsSync(lockPath)) {
-    const pid = Number(readFileSync(lockPath, 'utf8').trim())
+  mkdirSync(WAAT_DIR, { recursive: true })
+  // adquisición atómica (O_EXCL), mismo patrón que el daemon
+  for (;;) {
     try {
-      process.kill(pid, 0)
-      die(`daemon ya corriendo (pid ${pid})`)
-    } catch {
-      /* stale */
+      const fd = openSync(lockPath, 'wx')
+      closeSync(fd)
+      break
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+      const pid = Number(readFileSync(lockPath, 'utf8').trim())
+      if (pid > 0 && pidAlive(pid)) die(`daemon ya corriendo (pid ${pid})`)
+      try {
+        unlinkSync(lockPath)
+      } catch {
+        /* lost the race on unlink; retry */
+      }
     }
   }
-  mkdirSync(WAAT_DIR, { recursive: true })
   const daemonJs = join(ROOT, 'daemon', 'dist', 'index.js')
   const child = spawn(process.execPath, [daemonJs], {
     detached: true,
@@ -80,7 +106,31 @@ function cmdStop(): void {
   const lockPath = join(WAAT_DIR, 'daemon.lock')
   if (!existsSync(lockPath)) die('daemon no corriendo')
   const pid = Number(readFileSync(lockPath, 'utf8').trim())
-  process.kill(pid, 'SIGTERM')
+  if (!(pid > 0) || !pidAlive(pid)) {
+    try {
+      unlinkSync(lockPath)
+    } catch {
+      /* ya no existe */
+    }
+    console.log('[waat] daemon no corriendo (lock stale, limpiado)')
+    return
+  }
+  try {
+    process.kill(pid, 'SIGTERM')
+  } catch {
+    try {
+      unlinkSync(lockPath)
+    } catch {
+      /* ya no existe */
+    }
+    console.log('[waat] daemon no corriendo (lock stale, limpiado)')
+    return
+  }
+  try {
+    unlinkSync(lockPath)
+  } catch {
+    /* ya no existe */
+  }
   console.log(`[waat] daemon detenido (pid ${pid})`)
 }
 
