@@ -7,10 +7,6 @@
   "description": "WhatsApp Agent Toolkit — vincula tu WhatsApp una vez y deja que tus agentes de código lean y escriban conversaciones",
   "keywords": ["whatsapp", "mcp", "agent", "ai", "baileys", "claude", "opencode"],
   "license": "MIT",
-  "files": ["dist", "../skills", "../daemon/dist", "../mcp/dist"],
-  "repository": { "type": "git", "url": "https://github.com/Drozast/waat" },
-  "author": "Dani Rozas Torres <dani@rozas.digital>",
-  "homepage": "https://github.com/Drozast/waat",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

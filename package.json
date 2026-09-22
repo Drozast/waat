@@ -1,9 +1,13 @@
 {
   "name": "waat",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "WhatsApp Agent Toolkit — vincula tu WhatsApp una vez y deja que tus agentes de código lean y escriban conversaciones",
+  "bin": { "waat": "cli/dist/index.js" },
+  "files": ["cli/dist", "daemon/dist", "mcp/dist", "skills"],
+  "repository": { "type": "git", "url": "https://github.com/Drozast/waat" },
+  "author": "Dani Rozas Torres <dani@rozas.digital>",
+  "homepage": "https://github.com/Drozast/waat",
   "workspaces": ["daemon", "mcp", "cli"],
   "scripts": {
     "build": "npm run build --workspaces",
