@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { WaClient } from './wa.js'
 import { listChats, readChat, searchMessages } from './chats.js'
 import { downloadMedia, defaultTranscriber, type DownloadResult } from './media.js'
-import { sendText, sendMedia } from './send.js'
+import { sendText, sendMedia, FileError } from './send.js'
 
 export interface DaemonDeps {
   wa: WaClient
@@ -47,6 +47,20 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
     return JSON.parse(raw || '{}')
   } catch {
     throw new InvalidJsonError('JSON inválido')
+  }
+}
+
+type BodyResult = { ok: true; body: unknown } | { ok: false; status: number; error: string }
+
+// Lee el body JSON mapeando los errores tipados de readBody a respuestas 4xx,
+// para que las rutas no dependan del catch genérico (500).
+async function readJsonBody(req: IncomingMessage): Promise<BodyResult> {
+  try {
+    return { ok: true, body: await readBody(req) }
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) return { ok: false, status: 413, error: 'body_too_large' }
+    if (err instanceof InvalidJsonError) return { ok: false, status: 400, error: 'invalid_json' }
+    throw err
   }
 }
 
@@ -115,14 +129,9 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
 
       if (path === '/media/download' && req.method === 'POST') {
         if (!deps.wa.socket) return json(res, 503, { ok: false, error: 'offline' })
-        let body: unknown
-        try {
-          body = await readBody(req)
-        } catch (err) {
-          if (err instanceof BodyTooLargeError) return json(res, 413, { ok: false, error: 'body_too_large' })
-          if (err instanceof InvalidJsonError) return json(res, 400, { ok: false, error: 'invalid_json' })
-          throw err
-        }
+        const parsed = await readJsonBody(req)
+        if (!parsed.ok) return json(res, parsed.status, { ok: false, error: parsed.error })
+        const body = parsed.body
         const chatId = (body as { chatId?: unknown })?.chatId
         const messageKey = (body as { messageKey?: unknown })?.messageKey
         if (
@@ -156,7 +165,9 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
       if (path === '/send/text' && req.method === 'POST') {
         const sock = deps.wa.socket
         if (!sock) return json(res, 503, { ok: false, error: 'offline' })
-        const body = (await readBody(req)) as { chatId: string; text: string }
+        const parsed = await readJsonBody(req)
+        if (!parsed.ok) return json(res, parsed.status, { ok: false, error: parsed.error })
+        const body = parsed.body as { chatId?: string; text?: string }
         if (!body.chatId || !body.text) {
           return json(res, 400, { ok: false, error: 'chatId y text son requeridos' })
         }
@@ -167,20 +178,31 @@ export function createServer(deps: DaemonDeps): Promise<DaemonHandle> {
       if (path === '/send/media' && req.method === 'POST') {
         const sock = deps.wa.socket
         if (!sock) return json(res, 503, { ok: false, error: 'offline' })
-        const body = (await readBody(req)) as {
-          chatId: string
-          filePath: string
+        const parsed = await readJsonBody(req)
+        if (!parsed.ok) return json(res, parsed.status, { ok: false, error: parsed.error })
+        const body = parsed.body as {
+          chatId?: string
+          filePath?: string
           caption?: string
           ptt?: boolean
         }
         if (!body.chatId || !body.filePath) {
           return json(res, 400, { ok: false, error: 'chatId y filePath son requeridos' })
         }
-        const data = await sendMedia(sock, body.chatId, body.filePath, {
-          caption: body.caption,
-          ptt: body.ptt,
-        })
-        return json(res, 200, { ok: true, data: { key: data.key.id, type: data.type } })
+        try {
+          const data = await sendMedia(sock, body.chatId, body.filePath, {
+            caption: body.caption,
+            ptt: body.ptt,
+          })
+          return json(res, 200, { ok: true, data: { key: data.key.id, type: data.type } })
+        } catch (err) {
+          if (err instanceof FileError) {
+            const status =
+              err.code === 'not_found' ? 404 : err.code === 'too_large' ? 413 : 400
+            return json(res, status, { ok: false, error: err.code })
+          }
+          throw err
+        }
       }
 
       return json(res, 404, { ok: false, error: 'not_found' })

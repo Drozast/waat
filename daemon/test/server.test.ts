@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Server } from 'node:http'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type DaemonHandle } from '../src/server.js'
@@ -176,5 +176,160 @@ test('POST /media/download dedupe: dos peticiones concurrentes al mismo mensaje 
     await wa2.stop()
     h2.server.close()
     h2.server.closeAllConnections()
+  }
+})
+
+// --- POST /send/text y /send/media ---
+
+async function postSend(route: string, body: string, contentType = 'application/json') {
+  return fetch(`${base}${route}`, {
+    method: 'POST',
+    headers: { 'x-waat-token': handle.token, 'content-type': contentType },
+    body,
+  })
+}
+
+test('POST /send/text offline responde 503', async () => {
+  const prev = (wa as any).sock
+  ;(wa as any).sock = null
+  try {
+    const res = await postSend('/send/text', JSON.stringify({ chatId: 'c@s.whatsapp.net', text: 'hola' }))
+    assert.equal(res.status, 503)
+    const body = await res.json()
+    assert.equal(body.error, 'offline')
+  } finally {
+    ;(wa as any).sock = prev
+  }
+})
+
+test('POST /send/text con campos ausentes responde 400', async () => {
+  const prev = (wa as any).sock
+  ;(wa as any).sock = {}
+  try {
+    const res = await postSend('/send/text', JSON.stringify({ chatId: 'c@s.whatsapp.net' }))
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.equal(body.ok, false)
+  } finally {
+    ;(wa as any).sock = prev
+  }
+})
+
+test('POST /send/text con JSON malformado responde 400 invalid_json', async () => {
+  const prev = (wa as any).sock
+  ;(wa as any).sock = {}
+  try {
+    const res = await postSend('/send/text', '{chatId: "c@s.whatsapp.net"')
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.equal(body.error, 'invalid_json')
+  } finally {
+    ;(wa as any).sock = prev
+  }
+})
+
+test('POST /send/text happy path responde 200 con key', async () => {
+  const prev = (wa as any).sock
+  ;(wa as any).sock = { sendMessage: async () => ({ key: { id: 'MSGID1' } }) }
+  try {
+    const res = await postSend('/send/text', JSON.stringify({ chatId: 'c@s.whatsapp.net', text: 'hola' }))
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.ok, true)
+    assert.equal(body.data.key, 'MSGID1')
+  } finally {
+    ;(wa as any).sock = prev
+  }
+})
+
+test('POST /send/media offline responde 503', async () => {
+  const prev = (wa as any).sock
+  ;(wa as any).sock = null
+  try {
+    const res = await postSend('/send/media', JSON.stringify({ chatId: 'c@s.whatsapp.net', filePath: '/tmp/x.jpg' }))
+    assert.equal(res.status, 503)
+    const body = await res.json()
+    assert.equal(body.error, 'offline')
+  } finally {
+    ;(wa as any).sock = prev
+  }
+})
+
+test('POST /send/media con campos ausentes responde 400', async () => {
+  const prev = (wa as any).sock
+  ;(wa as any).sock = {}
+  try {
+    const res = await postSend('/send/media', JSON.stringify({ chatId: 'c@s.whatsapp.net' }))
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.equal(body.ok, false)
+  } finally {
+    ;(wa as any).sock = prev
+  }
+})
+
+test('POST /send/media con JSON malformado responde 400 invalid_json', async () => {
+  const prev = (wa as any).sock
+  ;(wa as any).sock = {}
+  try {
+    const res = await postSend('/send/media', '{chatId: "c@s.whatsapp.net"')
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.equal(body.error, 'invalid_json')
+  } finally {
+    ;(wa as any).sock = prev
+  }
+})
+
+test('POST /send/media happy path responde 200 con key y type', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'waat-send-http-'))
+  const file = join(dir, 'foto.png')
+  writeFileSync(file, 'PNGDATA')
+  const prev = (wa as any).sock
+  ;(wa as any).sock = { sendMessage: async () => ({ key: { id: 'MSGID2' } }) }
+  try {
+    const res = await postSend(
+      '/send/media',
+      JSON.stringify({ chatId: 'c@s.whatsapp.net', filePath: file, caption: 'hola' }),
+    )
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.ok, true)
+    assert.equal(body.data.key, 'MSGID2')
+    assert.equal(body.data.type, 'image')
+  } finally {
+    ;(wa as any).sock = prev
+  }
+})
+
+test('POST /send/media con archivo inexistente responde 404 not_found', async () => {
+  const prev = (wa as any).sock
+  ;(wa as any).sock = { sendMessage: async () => ({ key: { id: 'MSGID3' } }) }
+  try {
+    const res = await postSend(
+      '/send/media',
+      JSON.stringify({ chatId: 'c@s.whatsapp.net', filePath: '/tmp/no-existe-waat.jpg' }),
+    )
+    assert.equal(res.status, 404)
+    const body = await res.json()
+    assert.equal(body.error, 'not_found')
+  } finally {
+    ;(wa as any).sock = prev
+  }
+})
+
+test('POST /send/media con ruta relativa responde 400 not_absolute', async () => {
+  const prev = (wa as any).sock
+  ;(wa as any).sock = { sendMessage: async () => ({ key: { id: 'MSGID4' } }) }
+  try {
+    const res = await postSend(
+      '/send/media',
+      JSON.stringify({ chatId: 'c@s.whatsapp.net', filePath: 'foto.jpg' }),
+    )
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.equal(body.error, 'not_absolute')
+  } finally {
+    ;(wa as any).sock = prev
   }
 })
