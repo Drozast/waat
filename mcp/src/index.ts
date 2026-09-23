@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -9,6 +10,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { WaatClient } from './client.js'
 import { dispatchTool } from './dispatch.js'
+import { ensureDaemon } from './daemon.js'
 
 function readToken(dir: string): string {
   const p = join(dir, 'token')
@@ -21,6 +23,10 @@ const client = new WaatClient({
   baseUrl: `http://127.0.0.1:${PORT}`,
   token: readToken(WAAT_DIR),
 })
+
+// El MCP vive en <root>/mcp/dist/index.js; el daemon en <root>/daemon/dist/index.js.
+// Funciona igual en el repo que en node_modules/waat (mismo layout).
+const DAEMON_JS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'daemon', 'dist', 'index.js')
 
 const TOOLS = [
   {
@@ -114,6 +120,11 @@ const server = new Server(
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  // Auto-spawn: si el daemon no está, lo arranca y espera a que responda.
+  // Si no se pudo arrancar, la tool devuelve offline con hint (no crash).
+  await ensureDaemon({ waatDir: WAAT_DIR, port: PORT, daemonJs: DAEMON_JS })
+  // El daemon recién arrancado puede haber creado el token; refrescamos.
+  client.setToken(readToken(WAAT_DIR))
   const args = (req.params.arguments ?? {}) as Record<string, unknown>
   const result = await dispatchTool(req.params.name, args, client)
   return {

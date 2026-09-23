@@ -19,14 +19,26 @@ export function defaultTranscriber(model: string, lang: string): Transcriber {
     // Dir temporal por llamada para no pisar la salida de otra transcripción concurrente
     const outDir = mkdtempSync(join(tmpdir(), 'waat-whisper-'))
     try {
-      await pExecFile('whisper', [
-        audioPath,
-        '--language', lang,
-        '--model', model,
-        '--output_format', 'txt',
-        '--output_dir', outDir,
-        '--fp16', 'False',
-      ])
+      try {
+        await pExecFile('whisper', [
+          audioPath,
+          '--language', lang,
+          '--model', model,
+          '--output_format', 'txt',
+          '--output_dir', outDir,
+          '--fp16', 'False',
+        ])
+      } catch (err) {
+        // Binario ausente del PATH: error claro con hint de instalación.
+        // (Lazy: whisper.cpp descarga el modelo en el primer uso, así que esto
+        // solo se paga cuando de verdad hay que transcribir.)
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new Error(
+            'whisper no está instalado. Instalá whisper.cpp (p. ej. `brew install whisper-cpp`) y verificá que el binario "whisper" esté en el PATH'
+          )
+        }
+        throw err
+      }
       // whisper escribe <output_dir>/<basename sin ext>.txt
       const base = basename(audioPath).replace(/\.[^.]+$/, '')
       const txtPath = join(outDir, `${base}.txt`)

@@ -52,7 +52,10 @@ async function api(path: string, method = 'GET'): Promise<any> {
 function cmdStatus(): void {
   api('/status')
     .then((b) => console.log(JSON.stringify(b, null, 2)))
-    .catch((e) => die(e instanceof Error ? e.message : 'daemon no responde. Corré: npx waat start'))
+    .catch((e) => {
+      const detail = e instanceof Error ? e.message : String(e)
+      die(`daemon no responde (${detail}). Arrancalo con: npx waat start`)
+    })
 }
 
 function cmdLink(): void {
@@ -165,6 +168,18 @@ function cmdInstall(): void {
   console.log('[waat] listo. Corré: npx waat link')
 }
 
+function printUsage(): void {
+  console.log(`waat — WhatsApp Agent Toolkit
+Uso:
+  waat            estado de la conexión (sin args)
+  waat install    registra MCP + skills en opencode y Claude Code
+  waat start      inicia el daemon
+  waat stop       detiene el daemon
+  waat link       muestra el QR para vincular WhatsApp
+  waat status     estado de la conexión
+  waat help       esta ayuda`)
+}
+
 const cmd = process.argv[2]
 switch (cmd) {
   case 'status': cmdStatus(); break
@@ -172,12 +187,18 @@ switch (cmd) {
   case 'start': cmdStart(); break
   case 'stop': cmdStop(); break
   case 'install': cmdInstall(); break
+  case 'help':
+  case '--help':
+  case '-h':
+    printUsage()
+    break
   default:
-    console.log(`waat — WhatsApp Agent Toolkit
-Uso:
-  waat install   registra MCP + skills en opencode y Claude Code
-  waat start     inicia el daemon
-  waat stop      detiene el daemon
-  waat link      muestra el QR para vincular WhatsApp
-  waat status    estado de la conexión`)
+    if (cmd === undefined) {
+      // Flujo simplificado: sin args = status
+      cmdStatus()
+    } else {
+      console.error(`[waat] comando desconocido: ${cmd}`)
+      printUsage()
+      process.exit(1)
+    }
 }

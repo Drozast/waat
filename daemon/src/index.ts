@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { WaClient } from './wa.js'
@@ -16,6 +17,10 @@ const HOST = process.env.WAAT_HOST ?? '127.0.0.1'
 mkdirSync(WAAT_DIR, { recursive: true })
 const tokenPath = join(WAAT_DIR, 'token')
 const existingToken = existsSync(tokenPath) ? readFileSync(tokenPath, 'utf8').trim() : undefined
+// El token se genera y persiste ANTES de levantar el server, para que cuando
+// /health responda el archivo ya exista (evita la carrera con el auto-spawn del MCP).
+const token = existingToken ?? randomBytes(16).toString('hex')
+if (!existingToken) writeFileSync(tokenPath, token, { mode: 0o600 })
 
 const wa = new WaClient({
   authDir: join(WAAT_DIR, 'auth'),
@@ -27,12 +32,11 @@ const handle = await createServer({
   wa,
   port: PORT,
   host: HOST,
-  token: existingToken,
+  token,
   exportDir: process.env.WAAT_EXPORT_DIR ?? join(homedir(), 'waat'),
   whisperModel: process.env.WAAT_WHISPER_MODEL ?? 'small',
   whisperLang: process.env.WAAT_WHISPER_LANG ?? 'Spanish',
 })
-if (!existingToken) writeFileSync(tokenPath, handle.token, { mode: 0o600 })
 console.log(`[waat] daemon listo en ${handle.url}`)
 
 await wa.start() // si hay sesión guardada entra directo; si no, queda en linking con QR

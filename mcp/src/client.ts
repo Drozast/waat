@@ -19,6 +19,11 @@ export class WaatClient {
     this.token = opts.token
   }
 
+  /** El daemon puede crear el token al arrancar; permite refrescarlo. */
+  setToken(token: string): void {
+    this.token = token
+  }
+
   async request(method: string, path: string, body?: unknown): Promise<WaatResponse> {
     let res: Response
     try {
@@ -31,10 +36,12 @@ export class WaatClient {
         body: body ? JSON.stringify(body) : undefined,
       })
     } catch {
-      return { ok: false, error: 'offline', hint: 'run: npx waat link' }
+      // Daemon no responde (no está escuchando). El MCP ya intentó auto-spawnearlo.
+      return { ok: false, error: 'offline', hint: 'daemon no responde. Revisá ~/.waat/daemon-err.log o corré: npx waat start' }
     }
     const json = (await res.json().catch(() => ({}))) as WaatResponse
     if (!json.ok && res.status === 503) {
+      // Daemon arriba pero WhatsApp no vinculado → hay que escanear el QR.
       return { ok: false, error: 'offline', hint: 'run: npx waat link' }
     }
     return json

@@ -8,6 +8,7 @@ import {
   transcribeAudio,
   downloadMedia,
   setMediaDownloader,
+  defaultTranscriber,
   type Transcriber,
 } from '../src/media.js'
 import type { ChatStore } from '../src/chats.js'
@@ -44,6 +45,22 @@ test('transcribeAudio con transcriber null no transcribe', async () => {
   writeFileSync(audioPath, 'fake-audio')
   const out = await transcribeAudio(audioPath, null)
   assert.equal(out.transcription, null)
+})
+
+test('defaultTranscriber: sin binario whisper en el PATH → error claro con hint', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'waat-media-'))
+  const audioPath = join(dir, 'a.opus')
+  writeFileSync(audioPath, 'fake-audio')
+  const emptyBin = mkdtempSync(join(tmpdir(), 'waat-empty-bin-'))
+  const oldPath = process.env.PATH
+  process.env.PATH = emptyBin // dir vacía: "whisper" no se resuelve → ENOENT
+  try {
+    const t = defaultTranscriber('base.en', 'es')
+    await assert.rejects(() => t(audioPath), /whisper no está instalado/)
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+  }
 })
 
 test('downloadMedia: mensaje no encontrado lanza', async () => {
