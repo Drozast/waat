@@ -42,7 +42,8 @@ node cli/dist/index.js link
 ```
 
 El daemon se arranca solo la primera vez que tu agente usa una tool `waat_*`
-(auto-spawn). Si preferís arrancarlo a mano: `npx waat start`.
+(auto-spawn). Si preferís arrancarlo a mano: `node ~/.waat-src/cli/dist/index.js start`
+(o `npx waat start` si instalaste por npm).
 
 Listo: "leeme el chat con Juan y sacame los acuerdos" — tu agente hace el resto.
 

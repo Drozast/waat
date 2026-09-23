@@ -1,3 +1,10 @@
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+
+// Path real del CLI (agnóstico del método de instalación: npm, curl|bash o git).
+// Este archivo vive en mcp/dist/client.js → raíz → cli/dist/index.js.
+const CLI_BIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'cli', 'dist', 'index.js')
+
 export interface WaatClientOptions {
   baseUrl: string
   token: string
@@ -37,12 +44,12 @@ export class WaatClient {
       })
     } catch {
       // Daemon no responde (no está escuchando). El MCP ya intentó auto-spawnearlo.
-      return { ok: false, error: 'offline', hint: 'daemon no responde. Revisá ~/.waat/daemon-err.log o corré: npx waat start' }
+      return { ok: false, error: 'offline', hint: `daemon no responde. Revisá ~/.waat/daemon-err.log o corré: node ${CLI_BIN} start` }
     }
     const json = (await res.json().catch(() => ({}))) as WaatResponse
     if (!json.ok && res.status === 503) {
       // Daemon arriba pero WhatsApp no vinculado → hay que escanear el QR.
-      return { ok: false, error: 'offline', hint: 'run: npx waat link' }
+      return { ok: false, error: 'offline', hint: `run: node ${CLI_BIN} link` }
     }
     return json
   }

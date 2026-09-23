@@ -11,6 +11,9 @@ const PORT = process.env.WAAT_PORT ?? '8787'
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..')
 const MCP_BIN = join(ROOT, 'mcp', 'dist', 'index.js')
 const SKILLS_DIR = join(ROOT, 'skills')
+// Path real de este CLI: los hints lo usan para que funcionen con cualquier
+// método de instalación (npm, curl|bash o git), sin depender de `npx waat`.
+const CLI_BIN = fileURLToPath(import.meta.url)
 
 function die(msg: string): never {
   console.error(`[waat] ${msg}`)
@@ -54,7 +57,7 @@ function cmdStatus(): void {
     .then((b) => console.log(JSON.stringify(b, null, 2)))
     .catch((e) => {
       const detail = e instanceof Error ? e.message : String(e)
-      die(`daemon no responde (${detail}). Arrancalo con: npx waat start`)
+      die(`daemon no responde (${detail}). Arrancalo con: node ${CLI_BIN} start`)
     })
 }
 
@@ -66,7 +69,7 @@ function cmdLink(): void {
         console.log('[waat] Escanealo con WhatsApp > Ajustes > Dispositivos vinculados')
       } else die(b.error)
     })
-    .catch((e) => die(e instanceof Error ? e.message : 'daemon no responde. Corré: npx waat start'))
+    .catch((e) => die(e instanceof Error ? e.message : `daemon no responde. Corré: node ${CLI_BIN} start`))
 }
 
 function cmdStart(): void {
@@ -165,7 +168,7 @@ function cmdInstall(): void {
       console.log(`[waat] skill copiada a ${dest}`)
     }
   }
-  console.log('[waat] listo. Corré: npx waat link')
+  console.log(`[waat] listo. Corré: node ${CLI_BIN} link`)
 }
 
 function printUsage(): void {

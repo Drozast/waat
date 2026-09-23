@@ -9,7 +9,7 @@ Herramientas MCP `waat_*` para hablar con el WhatsApp del usuario (vinculado una
 
 ## Flujo estándar
 
-1. `waat_status` — verificar que `state` sea `online`. Si es `offline`/`needs_relink`, decirle al usuario que corra `npx waat link` y escanee el QR.
+1. `waat_status` — verificar que `state` sea `online`. Si es `offline`/`needs_relink`, decirle al usuario que corra el comando `link` que aparece en el `hint` de la tool (p. ej. `node ~/.waat-src/cli/dist/index.js link`) y escanee el QR.
 2. `waat_list_chats` (con `q` si el usuario dio un nombre) — identificar el `chatId`.
 3. `waat_read_chat` con ese `chatId` — leer los mensajes (paginado con `before` si hay más).
 4. Si hay media relevante (`[imagen]`, `[audio]`, `[video]`, `[documento]` en el texto), `waat_download_media` con el `messageKey` correspondiente. Los audios ya vienen transcritos; las imágenes se leen por su ruta.
