@@ -10,17 +10,29 @@ Vincula tu WhatsApp **una vez** y deja que tus agentes de código (opencode, Cla
 
 ## Instalación
 
-### Opción 1 — npm (recomendada)
+### Opción 1 — un solo comando (recomendada)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Drozast/waat/main/install.sh | bash
+```
+
+Clona el repo a `~/.waat-src`, compila y registra el MCP + skills en opencode y
+Claude Code. Después vinculá WhatsApp una vez:
+
+```bash
+node ~/.waat-src/cli/dist/index.js link   # escanea el QR con WhatsApp
+```
+
+Para actualizar más tarde, repetí el mismo `curl | bash` (hace `git pull` + build).
+
+### Opción 2 — npm
 
 ```bash
 npx waat install   # registra MCP + skills en opencode y Claude Code
 npx waat link      # escanea el QR con WhatsApp (una vez)
 ```
 
-El daemon se arranca solo la primera vez que tu agente usa una tool `waat_*`
-(auto-spawn). Si preferís arrancarlo a mano: `npx waat start`.
-
-### Opción 2 — desde git
+### Opción 3 — desde git
 
 ```bash
 git clone https://github.com/Drozast/waat
@@ -29,6 +41,9 @@ node cli/dist/index.js install
 node cli/dist/index.js link
 ```
 
+El daemon se arranca solo la primera vez que tu agente usa una tool `waat_*`
+(auto-spawn). Si preferís arrancarlo a mano: `npx waat start`.
+
 Listo: "leeme el chat con Juan y sacame los acuerdos" — tu agente hace el resto.
 
 ### Uso en tu agente
@@ -36,8 +51,9 @@ Listo: "leeme el chat con Juan y sacame los acuerdos" — tu agente hace el rest
 - **opencode** y **Claude Code** ya detectan el MCP y la skill automáticamente.
 - Pedí: *"leeme el chat con Juan"*, *"buscá 'factura' en WhatsApp"*,
   *"descargá el audio de María y resumilo"*, *"mandale a Pedro: voy en 10"*.
-- El agente verifica `waat_status`; si está `offline`, te pide que corras
-  `npx waat link` y escanees el QR.
+- El agente verifica `waat_status`; si está `offline`, te pide que corras el
+  comando `link` que te mostró la instalación (p. ej.
+  `node ~/.waat-src/cli/dist/index.js link`) y escanees el QR.
 
 ## Cómo funciona
 
