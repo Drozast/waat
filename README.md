@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/demo.gif" alt="demo" width="420"/>
-</p>
-
 # waat — WhatsApp Agent Toolkit
 
 Vincula tu WhatsApp **una vez** y deja que tus agentes de código (opencode, Claude Code, o cualquier cliente MCP) lean conversaciones, descarguen imágenes/audios/videos y envíen mensajes. Sin copiar y pegar.
@@ -12,15 +8,36 @@ Vincula tu WhatsApp **una vez** y deja que tus agentes de código (opencode, Cla
 - 🤖 MCP server: funciona en opencode, Claude Code y cualquier cliente MCP
 - 🔒 Todo local: daemon en `localhost:8787`, nada pasa por la nube
 
-## Quickstart
+## Instalación
+
+### Opción 1 — npm (recomendada)
 
 ```bash
 npx waat install   # registra MCP + skills en opencode y Claude Code
-npx waat start     # inicia el daemon
-npx waat link      # escanea el QR con WhatsApp
+npx waat link      # escanea el QR con WhatsApp (una vez)
+```
+
+El daemon se arranca solo la primera vez que tu agente usa una tool `waat_*`
+(auto-spawn). Si preferís arrancarlo a mano: `npx waat start`.
+
+### Opción 2 — desde git
+
+```bash
+git clone https://github.com/Drozast/waat
+cd waat && npm install && npm run build
+node cli/dist/index.js install
+node cli/dist/index.js link
 ```
 
 Listo: "leeme el chat con Juan y sacame los acuerdos" — tu agente hace el resto.
+
+### Uso en tu agente
+
+- **opencode** y **Claude Code** ya detectan el MCP y la skill automáticamente.
+- Pedí: *"leeme el chat con Juan"*, *"buscá 'factura' en WhatsApp"*,
+  *"descargá el audio de María y resumilo"*, *"mandale a Pedro: voy en 10"*.
+- El agente verifica `waat_status`; si está `offline`, te pide que corras
+  `npx waat link` y escanees el QR.
 
 ## Cómo funciona
 
@@ -52,7 +69,7 @@ Una sola conexión aunque uses varias herramientas a la vez.
 ## Requisitos
 
 - Node 22+
-- (opcional, para transcripción) [whisper](https://github.com/openai/whisper) local
+- (opcional, para transcripción de audios) [whisper.cpp](https://github.com/ggml-org/whisper.cpp) — `brew install whisper-cpp`
 
 ## Desarrollo
 
