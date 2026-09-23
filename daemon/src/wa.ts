@@ -3,13 +3,13 @@ import { join } from 'node:path'
 import QRCode from 'qrcode'
 import {
   makeWASocket,
-  makeInMemoryStore,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   DisconnectReason,
   type WASocket,
 } from '@whiskeysockets/baileys'
+import { makeInMemoryStore } from './store.js'
 
 const logger = {
   level: 'info',
@@ -45,6 +45,9 @@ export class WaClient {
   private reconnectTimer: NodeJS.Timeout | null = null
   private starting = false
   private startPromise: Promise<void> | null = null
+  // true entre sock.end() y el evento 'close' asíncrono de Baileys. Evita que
+  // el handler de connection.update agende un reconnect tras stop() (zombie).
+  private stopping = false
   private storeRef = makeInMemoryStore({ logger })
   private opts: WaClientOptions
   private qrFile: string
@@ -93,6 +96,8 @@ export class WaClient {
   }
 
   private async doStart(): Promise<void> {
+    // Un start() nuevo (reconnect o /link) reinicia la bandera de stop().
+    this.stopping = false
     const { state: authState, saveCreds } = await useMultiFileAuthState(
       this.opts.authDir,
     )
@@ -114,10 +119,10 @@ export class WaClient {
     sock.ev.on('creds.update', saveCreds)
 
     sock.ev.on('messaging-history.set', ({ chats }) => {
-      this.chatJids = new Set(chats.map((c) => c.id))
+      this.chatJids = new Set(chats.map((c) => c.id).filter((id): id is string => !!id))
     })
     sock.ev.on('chats.upsert', (chats) => {
-      for (const c of chats) this.chatJids.add(c.id)
+      for (const c of chats) if (c.id) this.chatJids.add(c.id)
     })
     sock.ev.on('chats.delete', (jids) => {
       for (const jid of jids) this.chatJids.delete(jid)
@@ -137,6 +142,8 @@ export class WaClient {
         if (this.qrTimer) clearTimeout(this.qrTimer)
       }
       if (connection === 'close') {
+        // stop() ya limpió state/jid/chatJids y no quiere reconnect.
+        if (this.stopping) return
         const code = (
           lastDisconnect?.error as
             | (Error & { output?: { statusCode?: number } })
@@ -160,6 +167,10 @@ export class WaClient {
     if (this.startPromise) await this.startPromise
     const sock = this.sock
     if (sock) {
+      // Marca stopping ANTES de end(): el evento 'close' de Baileys es asíncrono
+      // y llega después de que stop() termine. Sin esta bandera, el handler de
+      // connection.update agendaría un reconnect y dejaría un socket zombie.
+      this.stopping = true
       sock.end(undefined)
       // end() removes all 'error' listeners, then ws.close() makes the ws
       // lib emit "closed before the connection was established" on the next

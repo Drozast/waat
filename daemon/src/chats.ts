@@ -1,9 +1,10 @@
 import {
-  makeInMemoryStore,
   toNumber,
   type WAMessage,
   type WAMessageContent,
+  type Chat,
 } from '@whiskeysockets/baileys'
+import { makeInMemoryStore } from './store.js'
 
 export type ChatStore = ReturnType<typeof makeInMemoryStore>
 
@@ -78,7 +79,7 @@ export function formatMessages(msgs: WAMessage[]): string {
 export function listChats(store: ChatStore): ChatSummary[] {
   return store.chats
     .all()
-    .filter((c) => c.id && !c.id.endsWith('@broadcast'))
+    .filter((c): c is Chat & { id: string } => !!c.id && !c.id.endsWith('@broadcast'))
     .map((c) => {
       const msgs = store.messages[c.id]?.array
       const last = msgs && msgs.length > 0 ? msgs[msgs.length - 1] : undefined
@@ -117,7 +118,7 @@ export async function searchMessages(
 ): Promise<{ chatId: string; chatName: string; matches: string }[]> {
   const q = query.toLowerCase()
   const allChats = store.chats.all()
-  const ids = chatId ? [chatId] : allChats.map((c) => c.id)
+  const ids = chatId ? [chatId] : allChats.map((c) => c.id).filter((id): id is string => !!id)
   const results: { chatId: string; chatName: string; matches: string }[] = []
   for (const id of ids) {
     const msgs = await loadAll(store, id)

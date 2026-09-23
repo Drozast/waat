@@ -10,7 +10,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "6.17.16",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {

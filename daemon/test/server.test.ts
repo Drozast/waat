@@ -21,6 +21,9 @@ before(async () => {
 after(async () => {
   await wa.stop()
   handle.server.close()
+  // close() no cierra conexiones keep-alive ya abiertas (fetch); sin esto el
+  // proceso se queda vivo con handles pendientes.
+  handle.server.closeAllConnections()
 })
 
 test('GET /health responde ok sin token', async () => {
